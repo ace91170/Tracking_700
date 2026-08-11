@@ -28,7 +28,7 @@
 
         .controls {
             position: absolute; bottom: 15px; right: 10px; z-index: 2000;
-            display: flex; flex-direction: column; gap: 5px; width: 150px;
+            display: flex; flex-direction: column; gap: 5px; width: 160px;
         }
 
         .zoom-controls {
@@ -60,7 +60,7 @@
         .btn-cancel { background: #dc3545; color: white; }
         
         select, input[type="text"] { padding: 8px; border-radius: 5px; border: 1px solid #ccc; font-family: "Arial Narrow"; font-size: 12px; }
-        #file-listbox { width: 100%; height: 150px; }
+        #file-listbox, #db-switch-listbox { width: 100%; height: 130px; }
         .alt-label { color: red !important; font-weight: bold !important; font-size: 9px !important; background: white !important; border: 1px solid red !important; padding: 0 2px; border-radius: 2px; }
     </style>
 </head>
@@ -68,9 +68,8 @@
 
 <div id="active-file-label">FILE: <span id="current-filename">DATABASE UTAMA</span></div>
 
-<!-- Hidden File Inputs -->
 <input type="file" id="import-txt-input" accept=".txt" style="display: none;" onchange="handleTxtImport(event)">
-<input type="file" id="import-gpx-input" accept=".gpx" style="display: none;" onchange="handleGpxImport(event)">
+<input type="file" id="import-gpx-input" accept=".gpx,.goz" style="display: none;" onchange="handleGpxImport(event)">
 
 <div id="start-overlay" style="position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.95); z-index:9000; display:flex; justify-content:center; align-items:center; text-align:center;">
     <button class="btn btn-action" style="padding:25px 50px; font-size:16px; border-radius:15px;" onclick="initApp()">
@@ -108,6 +107,17 @@
     <button class="btn btn-action" onclick="closeDialog('load-dialog')">TUTUP</button>
 </div>
 
+<!-- Dialog Switch Database / Ganti Database Aktif -->
+<div id="switch-db-dialog" class="custom-dialog">
+    <h4 style="margin:0">Switch Database Aktif</h4>
+    <p style="font-size: 10px; color: #666; margin:0">Pilih database penyimpanan yang ingin digunakan:</p>
+    <select id="db-switch-listbox" size="5"></select>
+    <div style="display: flex; gap: 5px;">
+        <button class="btn btn-save" style="flex:1" onclick="confirmSwitchDatabase()">GUNAKAN</button>
+        <button class="btn btn-cancel" style="flex:1" onclick="closeDialog('switch-db-dialog')">BATAL</button>
+    </div>
+</div>
+
 <div class="status-bar" id="stat">Mencari Sinyal GPS...</div>
 <div id="map"></div>
 
@@ -122,7 +132,8 @@
     <button id="btn-manual-save" class="btn btn-save" onclick="openSaveDialog()">📍 SIMPAN TITIK</button>
     <button id="btn-view" class="btn btn-load" onclick="openLoadDialog()">📂 LIHAT DATA</button>
     <button id="btn-import" class="btn btn-util" style="background:#17a2b8;" onclick="triggerTxtImport()">📂 IMPOR TXT</button>
-    <button id="btn-import-gpx" class="btn btn-util" style="background:#e83e8c;" onclick="triggerGpxImport()">📂 IMPOR GPX</button>
+    <button id="btn-import-gpx" class="btn btn-util" style="background:#e83e8c;" onclick="triggerGpxImport()">📂 IMPOR GPX/GOZ</button>
+    <button id="btn-switch-db" class="btn btn-action" style="background:#6c757d;" onclick="openSwitchDatabaseDialog()">🔀 SWITCH DB</button>
     <button id="btn-db-back" class="btn btn-action" style="background:#fd7e14;" onclick="loadAllPointsFromDatabase()">🔄 KEMBALI KE DB UTAMA</button>
     <button id="btn-clear" class="btn btn-action" onclick="clearScreen()">🧹 BERSIHKAN</button>
     <button id="btn-export" class="btn btn-save" style="background:#008800" onclick="exportData()">💾 EKSPOR GPX</button>
@@ -137,6 +148,9 @@ let map, userMarker, markersLayer;
 let isAutoOn = false, autoInterval = null;
 let followUser = true, firstLock = true;
 let tempAutoPoints = []; 
+
+// Menyimpan nama database aktif saat ini (Default: 'gps_pro_db')
+let activeDatabaseKey = 'gps_pro_db';
 
 function initApp() {
     document.getElementById('start-overlay').style.display = 'none';
@@ -192,12 +206,13 @@ function initApp() {
     }
 }
 
-// Memuat database utama lokal
+// Memuat data berdasarkan database aktif yang dipilih
 function loadAllPointsFromDatabase() {
+    activeDatabaseKey = 'gps_pro_db'; // Kembalikan ke database utama internal
     markersLayer.clearLayers();
     activePoints = [];
     
-    let savedDb = localStorage.getItem('gps_pro_db');
+    let savedDb = localStorage.getItem(activeDatabaseKey);
     if (!savedDb) {
         document.getElementById('active-file-label').style.display = 'none';
         updateStatus();
@@ -302,7 +317,7 @@ function confirmSave() {
     const name = document.getElementById('point-name').value.trim();
     if(!name) return alert("Nama wajib diisi!");
     
-    let savedDb = localStorage.getItem('gps_pro_db');
+    let savedDb = localStorage.getItem(activeDatabaseKey);
     let currentDb = savedDb ? JSON.parse(savedDb) : {};
 
     if (tempAutoPoints.length === 0) {
@@ -312,9 +327,14 @@ function confirmSave() {
         currentDb[name] = [...tempAutoPoints];
     }
     
-    localStorage.setItem('gps_pro_db', JSON.stringify(currentDb));
+    localStorage.setItem(activeDatabaseKey, JSON.stringify(currentDb));
     cancelSave();
-    loadAllPointsFromDatabase(); // Refresh tampilan dari database utama
+    
+    if (activeDatabaseKey === 'gps_pro_db') {
+        loadAllPointsFromDatabase();
+    } else {
+        loadSpecificDatabase(activeDatabaseKey);
+    }
 }
 
 function cancelSave() {
@@ -330,8 +350,8 @@ function openSaveDialog() {
 }
 
 function openLoadDialog() {
-    let savedDb = localStorage.getItem('gps_pro_db');
-    if (!savedDb) return alert("Belum ada data tersimpan.");
+    let savedDb = localStorage.getItem(activeDatabaseKey);
+    if (!savedDb) return alert("Belum ada data tersimpan di database aktif.");
     db = JSON.parse(savedDb);
 
     const listbox = document.getElementById('file-listbox');
@@ -348,7 +368,7 @@ function openLoadDialog() {
 function processLoad() {
     const key = document.getElementById('file-listbox').value;
     if(!key) return;
-    let savedDb = localStorage.getItem('gps_pro_db');
+    let savedDb = localStorage.getItem(activeDatabaseKey);
     let currentDb = savedDb ? JSON.parse(savedDb) : {};
     
     activePoints = currentDb[key] || [];
@@ -377,31 +397,138 @@ function addMarker(c) {
 }
 
 function exportData() {
-    if(activePoints.length === 0) return alert("Tidak ada titik untuk diekspor.");
-    let gpx = `<?xml version="1.0" encoding="UTF-8"?><gpx version="1.1" creator="GPSLoggerPro"><trk><trkseg>`;
-    activePoints.forEach(c => { 
+    let savedDb = localStorage.getItem(activeDatabaseKey);
+    if (!savedDb) return alert("Tidak ada data tersimpan untuk diekspor.");
+    
+    let allDb = JSON.parse(savedDb);
+    let totalPointsToExport = [];
+
+    Object.keys(allDb).forEach(key => {
+        let pts = allDb[key];
+        if (Array.isArray(pts)) {
+            pts.forEach(p => totalPointsToExport.push(p));
+        }
+    });
+
+    if (totalPointsToExport.length === 0) return alert("Database kosong.");
+
+    let gpx = `<?xml version="1.0" encoding="UTF-8"?>\n<gpx version="1.1" creator="GPSLoggerPro">\n<trk>\n<name>Export GPS Data</name>\n<trkseg>`;
+    
+    totalPointsToExport.forEach(c => { 
         gpx += `\n<trkpt lat="${c.lat}" lon="${c.lng}"><ele>${c.alt || 0}</ele><time>${c.time || new Date().toISOString()}</time><name>${c.name || 'Pt'}</name></trkpt>`; 
     });
-    gpx += `\n</trkseg></trk></gpx>`;
+    
+    gpx += `\n</trkseg>\n</trk>\n</gpx>`;
+    
     const a = document.createElement('a');
     a.href = URL.createObjectURL(new Blob([gpx], { type: 'application/gpx+xml' }));
-    a.download = `GPS_TRACK_${Date.now()}.gpx`;
+    a.download = `GPS_EXPORT_${Date.now()}.gpx`;
     a.click();
 }
 
 function deleteHistory() {
     const key = document.getElementById('file-listbox').value;
-    if(key && confirm(`Hapus sesi ${key} dari database utama?`)) { 
-        let savedDb = localStorage.getItem('gps_pro_db');
+    if(key && confirm(`Hapus sesi ${key} dari database aktif?`)) { 
+        let savedDb = localStorage.getItem(activeDatabaseKey);
         let currentDb = savedDb ? JSON.parse(savedDb) : {};
         delete currentDb[key]; 
-        localStorage.setItem('gps_pro_db', JSON.stringify(currentDb)); 
+        localStorage.setItem(activeDatabaseKey, JSON.stringify(currentDb)); 
         openLoadDialog(); 
-        loadAllPointsFromDatabase(); 
+        if (activeDatabaseKey === 'gps_pro_db') {
+            loadAllPointsFromDatabase();
+        } else {
+            loadSpecificDatabase(activeDatabaseKey);
+        }
     }
 }
 
-// --- FITUR IMPORT TXT & GPX (Terpisah / Sifatnya Menampilkan Saja atau Ditambah ke DB) ---
+// --- FITUR SWITCH / GANTI DATABASE ---
+function openSwitchDatabaseDialog() {
+    const listbox = document.getElementById('db-switch-listbox');
+    listbox.innerHTML = "";
+    
+    // Cari semua key database yang ada di localStorage
+    let dbKeys = [];
+    for (let i = 0; i < localStorage.length; i++) {
+        let key = localStorage.key(i);
+        if (key.startsWith('db_import_') || key === 'gps_pro_db') {
+            dbKeys.push(key);
+        }
+    }
+    
+    if (dbKeys.length === 0) {
+        dbKeys.push('gps_pro_db');
+    }
+
+    dbKeys.forEach(k => {
+        let opt = document.createElement('option');
+        opt.value = k;
+        opt.text = (k === 'gps_pro_db') ? "DATABASE UTAMA (Internal)" : `IMPOR: ${k.replace('db_import_', '')}`;
+        if (k === activeDatabaseKey) opt.selected = true;
+        listbox.add(opt);
+    });
+
+    document.getElementById('switch-db-dialog').style.display = 'flex';
+}
+
+function confirmSwitchDatabase() {
+    const selectedKey = document.getElementById('db-switch-listbox').value;
+    if (!selectedKey) return;
+    
+    activeDatabaseKey = selectedKey;
+    closeDialog('switch-db-dialog');
+
+    if (activeDatabaseKey === 'gps_pro_db') {
+        loadAllPointsFromDatabase();
+        alert("Berpindah ke Database Utama Internal.");
+    } else {
+        loadSpecificDatabase(activeDatabaseKey);
+        alert(`Berpindah ke database: ${activeDatabaseKey.replace('db_import_', '')}`);
+    }
+}
+
+function loadSpecificDatabase(dbKey) {
+    markersLayer.clearLayers();
+    activePoints = [];
+    
+    let savedDb = localStorage.getItem(dbKey);
+    if (!savedDb) return;
+    
+    try {
+        db = JSON.parse(savedDb);
+    } catch(e) {
+        db = {};
+    }
+
+    let hasPoints = false;
+    Object.keys(db).forEach(key => {
+        let points = db[key];
+        if (Array.isArray(points)) {
+            points.forEach(point => {
+                if (point.lat && point.lng) {
+                    activePoints.push(point);
+                    addMarker(point);
+                    hasPoints = true;
+                }
+            });
+        }
+    });
+    
+    if (hasPoints) {
+        document.getElementById('active-file-label').style.display = 'block';
+        document.getElementById('current-filename').innerText = "DB: " + dbKey.replace('db_import_', '').toUpperCase();
+        const last = activePoints[activePoints.length - 1];
+        if (last && last.lat && last.lng) {
+            map.setView([last.lat, last.lng], 16, { animate: true });
+        }
+        setFollowMode(false);
+    } else {
+        document.getElementById('active-file-label').style.display = 'none';
+    }
+    updateStatus();
+}
+
+// --- FITUR IMPORT TXT, GPX, & GOZ (Database Terpisah/Baru) ---
 function triggerTxtImport() { document.getElementById('import-txt-input').click(); }
 function triggerGpxImport() { document.getElementById('import-gpx-input').click(); }
 
@@ -426,12 +553,17 @@ function handleTxtImport(event) {
         });
         if (sessionPoints.length > 0) {
             let cleanName = file.name.replace(/\.[^/.]+$/, "");
-            let savedDb = localStorage.getItem('gps_pro_db');
-            let currentDb = savedDb ? JSON.parse(savedDb) : {};
-            currentDb[cleanName] = sessionPoints;
-            localStorage.setItem('gps_pro_db', JSON.stringify(currentDb));
-            loadAllPointsFromDatabase();
-            alert(`Berhasil mengimpor ${sessionPoints.length} titik TXT ke database!`);
+            let newDbKey = 'db_import_' + cleanName + '_' + Date.now();
+            
+            let newDb = {};
+            newDb[cleanName] = sessionPoints;
+            localStorage.setItem(newDbKey, JSON.stringify(newDb));
+            
+            // Set database aktif ke database baru hasil import
+            activeDatabaseKey = newDbKey;
+            loadSpecificDatabase(activeDatabaseKey);
+            
+            alert(`Berhasil mengimpor TXT ke database baru: "${cleanName}". Database lama tetap aman.`);
         } else {
             alert("Format TXT tidak valid.");
         }
@@ -468,22 +600,23 @@ function handleGpxImport(event) {
             }
 
             if (sessionPoints.length > 0) {
-                // Tampilkan sementara di layar tanpa merusak database utama, atau masukkan ke database opsional
-                markersLayer.clearLayers();
-                activePoints = sessionPoints;
-                activePoints.forEach(addMarker);
+                let cleanName = file.name.replace(/\.[^/.]+$/, "");
+                let newDbKey = 'db_import_' + cleanName + '_' + Date.now();
                 
-                document.getElementById('current-filename').innerText = "VIEW GPX: " + file.name;
-                document.getElementById('active-file-label').style.display = 'block';
-                setFollowMode(false);
-                map.setView([activePoints[0].lat, activePoints[0].lng], 16, { animate: true });
+                let newDb = {};
+                newDb[cleanName] = sessionPoints;
+                localStorage.setItem(newDbKey, JSON.stringify(newDb));
                 
-                alert(`Berhasil membuka file GPX (${sessionPoints.length} titik). Klik tombol "KEMBALI KE DB UTAMA" untuk kembali.`);
+                // Ubah database aktif ke database baru hasil import GPX/GOZ
+                activeDatabaseKey = newDbKey;
+                loadSpecificDatabase(activeDatabaseKey);
+                
+                alert(`Berhasil mengimpor file (${sessionPoints.length} titik) ke database baru: "${cleanName}". Database lama tetap aman.`);
             } else {
-                alert("Tidak ada titik koordinat valid ditemukan di dalam file GPX.");
+                alert("Tidak ada titik koordinat valid ditemukan di dalam file.");
             }
         } catch(err) {
-            alert("Gagal membaca file GPX.");
+            alert("Gagal membaca file.");
         }
         event.target.value = "";
     };
