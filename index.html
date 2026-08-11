@@ -127,7 +127,7 @@
 
 <script>
 let activePoints = []; 
-let db = JSON.parse(localStorage.getItem('gps_pro_db')) || {}; 
+let db = {}; 
 let currentPos = null, rawLat = 0, rawLng = 0, currentAlt = 0;
 let map, userMarker, markersLayer;
 let isAutoOn = false, autoInterval = null;
@@ -168,7 +168,6 @@ function initApp() {
             userMarker.setLatLng(currentPos);
             
             if (firstLock) { 
-                // Jika belum ada titik sama sekali di database, fokus ke lokasi GPS saat ini
                 if (activePoints.length === 0) {
                     map.setView(currentPos, 18);
                 }
@@ -190,29 +189,46 @@ function initApp() {
     }
 }
 
-// Fungsi untuk meload dan menampilkan seluruh titik dari database ke peta
+// Fungsi untuk meload dan menampilkan seluruh titik dari localStorage ke peta
 function loadAllPointsFromDatabase() {
     markersLayer.clearLayers();
     activePoints = [];
     
+    let savedDb = localStorage.getItem('gps_pro_db');
+    if (!savedDb) return;
+    
+    try {
+        db = JSON.parse(savedDb);
+    } catch(e) {
+        db = {};
+    }
+
     let hasPoints = false;
+    
     Object.keys(db).forEach(key => {
-        const points = db[key];
+        let points = db[key];
         if (Array.isArray(points)) {
             points.forEach(point => {
-                activePoints.push(point);
-                addMarker(point);
-                hasPoints = true;
+                if (point.lat && point.lng) {
+                    activePoints.push(point);
+                    addMarker(point);
+                    hasPoints = true;
+                }
             });
         }
     });
     
     if (hasPoints) {
         document.getElementById('active-file-label').style.display = 'block';
-        // Arahkan peta ke titik terakhir dari keseluruhan database
+        document.getElementById('current-filename').innerText = "SEMUA DATABASE (" + activePoints.length + " Titik)";
+        
         const last = activePoints[activePoints.length - 1];
-        map.setView([last.lat, last.lng], 16, { animate: true });
+        if (last && last.lat && last.lng) {
+            map.setView([last.lat, last.lng], 16, { animate: true });
+        }
         setFollowMode(false);
+    } else {
+        document.getElementById('active-file-label').style.display = 'none';
     }
     updateStatus();
 }
@@ -243,7 +259,6 @@ function setZoom18() {
 function updateStatus() {
     const netStatus = navigator.onLine ? "ONLINE" : "OFFLINE (BLANK SPOT)";
     const modeText = followUser ? "LOCK" : "FREE";
-    const currentZ = map.getZoom();
     const latStr = currentPos ? rawLat.toFixed(7) : "0.0000000";
     const lngStr = currentPos ? rawLng.toFixed(7) : "0.0000000";
     document.getElementById('stat').innerHTML = `STATUS: ${netStatus}<br>MODE: ${modeText} | PTS: ${activePoints.length}<br>${latStr}, ${lngStr}`;
@@ -364,7 +379,7 @@ function deleteHistory() {
         delete db[key]; 
         localStorage.setItem('gps_pro_db', JSON.stringify(db)); 
         openLoadDialog(); 
-        loadAllPointsFromDatabase(); // Refresh tampilan peta
+        loadAllPointsFromDatabase(); 
     }
 }
 
@@ -418,7 +433,6 @@ function handleTxtImport(event) {
             db[saveKey] = sessionPoints;
             localStorage.setItem('gps_pro_db', JSON.stringify(db));
 
-            // Muat ulang seluruh database termasuk data baru
             loadAllPointsFromDatabase();
 
             document.getElementById('current-filename').innerText = saveKey;
