@@ -66,13 +66,13 @@
 </head>
 <body>
 
-<div id="active-file-label">FILE: <span id="current-filename">-</span></div>
+<div id="active-file-label">FILE: <span id="current-filename">SEMUA DATA</span></div>
 
 <input type="file" id="import-txt-input" accept=".txt" style="display: none;" onchange="handleTxtImport(event)">
 
 <div id="start-overlay" style="position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.95); z-index:9000; display:flex; justify-content:center; align-items:center; text-align:center;">
     <button class="btn btn-action" style="padding:25px 50px; font-size:16px; border-radius:15px;" onclick="initApp()">
-        🚀 START GPS BLANK SPOT<br>(OFFLINE READY)
+        🚀 START GPS BLANK SPOT<br>(LOAD ALL POINTS)
     </button>
 </div>
 
@@ -144,17 +144,18 @@ function initApp() {
         maxZoom: 20 
     }).setView([0,0], 2);
 
-    // Menggunakan peta dasar OpenStreetMap
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         maxZoom: 20,
         maxNativeZoom: 19,
-        // Mendukung caching otomatis browser jika area sudah pernah dikunjungi
         keepBuffer: 10
     }).addTo(map);
 
     markersLayer = L.layerGroup().addTo(map);
     userMarker = L.circleMarker([0,0], { radius: 8, color: '#fff', fillColor: '#007bff', fillOpacity: 1, weight: 3 }).addTo(map);
     
+    // Otomatis muat SEMUA titik dari database saat aplikasi dijalankan
+    loadAllPointsFromDatabase();
+
     map.on('movestart', (e) => { if (!e.hard) setFollowMode(false); });
     map.on('zoomend', () => { updateStatus(); }); 
 
@@ -167,12 +168,14 @@ function initApp() {
             userMarker.setLatLng(currentPos);
             
             if (firstLock) { 
-                map.setView(currentPos, 18); 
+                // Jika belum ada titik sama sekali di database, fokus ke lokasi GPS saat ini
+                if (activePoints.length === 0) {
+                    map.setView(currentPos, 18);
+                }
                 firstLock = false; 
                 setFollowMode(true); 
             } else if (followUser) { 
-                let zoomSekarang = map.getZoom();
-                map.setView(currentPos, zoomSekarang, { animate: false }); 
+                map.setView(currentPos, map.getZoom(), { animate: false }); 
             }
             updateStatus();
         }, err => {
@@ -185,6 +188,33 @@ function initApp() {
     } else {
         alert("Geolocation tidak didukung oleh browser perangkat ini.");
     }
+}
+
+// Fungsi untuk meload dan menampilkan seluruh titik dari database ke peta
+function loadAllPointsFromDatabase() {
+    markersLayer.clearLayers();
+    activePoints = [];
+    
+    let hasPoints = false;
+    Object.keys(db).forEach(key => {
+        const points = db[key];
+        if (Array.isArray(points)) {
+            points.forEach(point => {
+                activePoints.push(point);
+                addMarker(point);
+                hasPoints = true;
+            });
+        }
+    });
+    
+    if (hasPoints) {
+        document.getElementById('active-file-label').style.display = 'block';
+        // Arahkan peta ke titik terakhir dari keseluruhan database
+        const last = activePoints[activePoints.length - 1];
+        map.setView([last.lat, last.lng], 16, { animate: true });
+        setFollowMode(false);
+    }
+    updateStatus();
 }
 
 function setFollowMode(mode) {
@@ -211,11 +241,12 @@ function setZoom18() {
 }
 
 function updateStatus() {
-    if(!currentPos) return;
     const netStatus = navigator.onLine ? "ONLINE" : "OFFLINE (BLANK SPOT)";
     const modeText = followUser ? "LOCK" : "FREE";
     const currentZ = map.getZoom();
-    document.getElementById('stat').innerHTML = `STATUS: ${netStatus}<br>MODE: ${modeText} | PTS: ${activePoints.length}<br>${rawLat.toFixed(7)}, ${rawLng.toFixed(7)}`;
+    const latStr = currentPos ? rawLat.toFixed(7) : "0.0000000";
+    const lngStr = currentPos ? rawLng.toFixed(7) : "0.0000000";
+    document.getElementById('stat').innerHTML = `STATUS: ${netStatus}<br>MODE: ${modeText} | PTS: ${activePoints.length}<br>${latStr}, ${lngStr}`;
 }
 
 function toggleAuto() {
@@ -259,6 +290,8 @@ function confirmSave() {
         db[name] = [...tempAutoPoints];
     }
     localStorage.setItem('gps_pro_db', JSON.stringify(db));
+    document.getElementById('current-filename').innerText = name;
+    document.getElementById('active-file-label').style.display = 'block';
     cancelSave();
 }
 
@@ -331,6 +364,7 @@ function deleteHistory() {
         delete db[key]; 
         localStorage.setItem('gps_pro_db', JSON.stringify(db)); 
         openLoadDialog(); 
+        loadAllPointsFromDatabase(); // Refresh tampilan peta
     }
 }
 
@@ -381,19 +415,14 @@ function handleTxtImport(event) {
                 counter++;
             }
 
-            activePoints = sessionPoints;
             db[saveKey] = sessionPoints;
             localStorage.setItem('gps_pro_db', JSON.stringify(db));
 
-            markersLayer.clearLayers();
-            activePoints.forEach(addMarker);
+            // Muat ulang seluruh database termasuk data baru
+            loadAllPointsFromDatabase();
 
             document.getElementById('current-filename').innerText = saveKey;
             document.getElementById('active-file-label').style.display = 'block';
-            setFollowMode(false);
-            
-            const last = activePoints[activePoints.length - 1];
-            map.setView([last.lat, last.lng], 16, { animate: true });
             
             alert(`Berhasil mengimpor dan menyimpan ${importedCount} titik dengan nama: "${saveKey}"!`);
         } else {
