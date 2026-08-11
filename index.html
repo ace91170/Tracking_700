@@ -28,7 +28,7 @@
 
         .controls {
             position: absolute; bottom: 15px; right: 10px; z-index: 2000;
-            display: flex; flex-direction: column; gap: 5px; width: 140px;
+            display: flex; flex-direction: column; gap: 5px; width: 150px;
         }
 
         .zoom-controls {
@@ -66,13 +66,15 @@
 </head>
 <body>
 
-<div id="active-file-label">FILE: <span id="current-filename">SEMUA DATA</span></div>
+<div id="active-file-label">FILE: <span id="current-filename">DATABASE UTAMA</span></div>
 
+<!-- Hidden File Inputs -->
 <input type="file" id="import-txt-input" accept=".txt" style="display: none;" onchange="handleTxtImport(event)">
+<input type="file" id="import-gpx-input" accept=".gpx" style="display: none;" onchange="handleGpxImport(event)">
 
 <div id="start-overlay" style="position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.95); z-index:9000; display:flex; justify-content:center; align-items:center; text-align:center;">
     <button class="btn btn-action" style="padding:25px 50px; font-size:16px; border-radius:15px;" onclick="initApp()">
-        🚀 START GPS BLANK SPOT<br>(LOAD ALL POINTS)
+        🚀 START GPS BLANK SPOT<br>(LOAD LOCAL DB)
     </button>
 </div>
 
@@ -120,6 +122,8 @@
     <button id="btn-manual-save" class="btn btn-save" onclick="openSaveDialog()">📍 SIMPAN TITIK</button>
     <button id="btn-view" class="btn btn-load" onclick="openLoadDialog()">📂 LIHAT DATA</button>
     <button id="btn-import" class="btn btn-util" style="background:#17a2b8;" onclick="triggerTxtImport()">📂 IMPOR TXT</button>
+    <button id="btn-import-gpx" class="btn btn-util" style="background:#e83e8c;" onclick="triggerGpxImport()">📂 IMPOR GPX</button>
+    <button id="btn-db-back" class="btn btn-action" style="background:#fd7e14;" onclick="loadAllPointsFromDatabase()">🔄 KEMBALI KE DB UTAMA</button>
     <button id="btn-clear" class="btn btn-action" onclick="clearScreen()">🧹 BERSIHKAN</button>
     <button id="btn-export" class="btn btn-save" style="background:#008800" onclick="exportData()">💾 EKSPOR GPX</button>
     <button id="btn-reset" class="btn btn-cancel" style="font-size: 9px;" onclick="resetApp()">⚠️ RESET TOTAL</button>
@@ -153,7 +157,6 @@ function initApp() {
     markersLayer = L.layerGroup().addTo(map);
     userMarker = L.circleMarker([0,0], { radius: 8, color: '#fff', fillColor: '#007bff', fillOpacity: 1, weight: 3 }).addTo(map);
     
-    // Otomatis muat SEMUA titik dari database saat aplikasi dijalankan
     loadAllPointsFromDatabase();
 
     map.on('movestart', (e) => { if (!e.hard) setFollowMode(false); });
@@ -189,13 +192,17 @@ function initApp() {
     }
 }
 
-// Fungsi untuk meload dan menampilkan seluruh titik dari localStorage ke peta
+// Memuat database utama lokal
 function loadAllPointsFromDatabase() {
     markersLayer.clearLayers();
     activePoints = [];
     
     let savedDb = localStorage.getItem('gps_pro_db');
-    if (!savedDb) return;
+    if (!savedDb) {
+        document.getElementById('active-file-label').style.display = 'none';
+        updateStatus();
+        return;
+    }
     
     try {
         db = JSON.parse(savedDb);
@@ -204,7 +211,6 @@ function loadAllPointsFromDatabase() {
     }
 
     let hasPoints = false;
-    
     Object.keys(db).forEach(key => {
         let points = db[key];
         if (Array.isArray(points)) {
@@ -220,8 +226,7 @@ function loadAllPointsFromDatabase() {
     
     if (hasPoints) {
         document.getElementById('active-file-label').style.display = 'block';
-        document.getElementById('current-filename').innerText = "SEMUA DATABASE (" + activePoints.length + " Titik)";
-        
+        document.getElementById('current-filename').innerText = "DATABASE UTAMA (" + activePoints.length + " Titik)";
         const last = activePoints[activePoints.length - 1];
         if (last && last.lat && last.lng) {
             map.setView([last.lat, last.lng], 16, { animate: true });
@@ -296,18 +301,20 @@ function saveAutoPoint() {
 function confirmSave() {
     const name = document.getElementById('point-name').value.trim();
     if(!name) return alert("Nama wajib diisi!");
+    
+    let savedDb = localStorage.getItem('gps_pro_db');
+    let currentDb = savedDb ? JSON.parse(savedDb) : {};
+
     if (tempAutoPoints.length === 0) {
         const entry = { lat: rawLat, lng: rawLng, alt: currentAlt, name: name, time: new Date().toISOString() };
-        activePoints.push(entry);
-        db[name] = [entry];
-        addMarker(entry);
+        currentDb[name] = [entry];
     } else {
-        db[name] = [...tempAutoPoints];
+        currentDb[name] = [...tempAutoPoints];
     }
-    localStorage.setItem('gps_pro_db', JSON.stringify(db));
-    document.getElementById('current-filename').innerText = name;
-    document.getElementById('active-file-label').style.display = 'block';
+    
+    localStorage.setItem('gps_pro_db', JSON.stringify(currentDb));
     cancelSave();
+    loadAllPointsFromDatabase(); // Refresh tampilan dari database utama
 }
 
 function cancelSave() {
@@ -323,6 +330,10 @@ function openSaveDialog() {
 }
 
 function openLoadDialog() {
+    let savedDb = localStorage.getItem('gps_pro_db');
+    if (!savedDb) return alert("Belum ada data tersimpan.");
+    db = JSON.parse(savedDb);
+
     const listbox = document.getElementById('file-listbox');
     listbox.innerHTML = "";
     Object.keys(db).forEach(key => {
@@ -337,14 +348,19 @@ function openLoadDialog() {
 function processLoad() {
     const key = document.getElementById('file-listbox').value;
     if(!key) return;
-    activePoints = db[key];
+    let savedDb = localStorage.getItem('gps_pro_db');
+    let currentDb = savedDb ? JSON.parse(savedDb) : {};
+    
+    activePoints = currentDb[key] || [];
     markersLayer.clearLayers();
     activePoints.forEach(addMarker);
     document.getElementById('current-filename').innerText = key;
     document.getElementById('active-file-label').style.display = 'block';
     setFollowMode(false); 
-    const last = activePoints[activePoints.length - 1];
-    map.setView([last.lat, last.lng], map.getZoom(), {animate: true}); 
+    if (activePoints.length > 0) {
+        const last = activePoints[activePoints.length - 1];
+        map.setView([last.lat, last.lng], map.getZoom(), {animate: true}); 
+    }
     closeDialog('load-dialog');
 }
 
@@ -357,14 +373,14 @@ function clearScreen() {
 
 function addMarker(c) {
     const m = L.circleMarker([c.lat, c.lng], { radius: 5, color: '#ff0000', fillColor: '#ff0000', fillOpacity: 0.8 }).addTo(markersLayer);
-    m.bindTooltip(`${c.name}`, { permanent: true, direction: 'bottom', className: 'alt-label', offset: [0, 5] });
+    m.bindTooltip(`${c.name || 'Titik'}`, { permanent: true, direction: 'bottom', className: 'alt-label', offset: [0, 5] });
 }
 
 function exportData() {
-    if(activePoints.length === 0) return alert("Peta sedang bersih.");
+    if(activePoints.length === 0) return alert("Tidak ada titik untuk diekspor.");
     let gpx = `<?xml version="1.0" encoding="UTF-8"?><gpx version="1.1" creator="GPSLoggerPro"><trk><trkseg>`;
     activePoints.forEach(c => { 
-        gpx += `\n<trkpt lat="${c.lat}" lon="${c.lng}"><ele>${c.alt}</ele><time>${c.time}</time><name>${c.name}</name></trkpt>`; 
+        gpx += `\n<trkpt lat="${c.lat}" lon="${c.lng}"><ele>${c.alt || 0}</ele><time>${c.time || new Date().toISOString()}</time><name>${c.name || 'Pt'}</name></trkpt>`; 
     });
     gpx += `\n</trkseg></trk></gpx>`;
     const a = document.createElement('a');
@@ -375,72 +391,99 @@ function exportData() {
 
 function deleteHistory() {
     const key = document.getElementById('file-listbox').value;
-    if(key && confirm(`Hapus ${key}?`)) { 
-        delete db[key]; 
-        localStorage.setItem('gps_pro_db', JSON.stringify(db)); 
+    if(key && confirm(`Hapus sesi ${key} dari database utama?`)) { 
+        let savedDb = localStorage.getItem('gps_pro_db');
+        let currentDb = savedDb ? JSON.parse(savedDb) : {};
+        delete currentDb[key]; 
+        localStorage.setItem('gps_pro_db', JSON.stringify(currentDb)); 
         openLoadDialog(); 
         loadAllPointsFromDatabase(); 
     }
 }
 
-function triggerTxtImport() {
-    document.getElementById('import-txt-input').click();
-}
+// --- FITUR IMPORT TXT & GPX (Terpisah / Sifatnya Menampilkan Saja atau Ditambah ke DB) ---
+function triggerTxtImport() { document.getElementById('import-txt-input').click(); }
+function triggerGpxImport() { document.getElementById('import-gpx-input').click(); }
 
 function handleTxtImport(event) {
     const file = event.target.files[0];
     if (!file) return;
-
     const reader = new FileReader();
     reader.onload = function(e) {
-        const text = e.target.result;
-        const lines = text.split(/\r?\n/);
-        let importedCount = 0;
+        const lines = e.target.result.split(/\r?\n/);
         let sessionPoints = [];
-
         lines.forEach((line, index) => {
             line = line.trim();
             if (!line) return;
-
             const parts = line.split(/[,\s]+/);
             if (parts.length >= 2) {
                 const lat = parseFloat(parts[0]);
                 const lng = parseFloat(parts[1]);
-
                 if (!isNaN(lat) && !isNaN(lng)) {
-                    const entry = { 
-                        lat: lat, 
-                        lng: lng, 
-                        alt: 0, 
-                        name: `Imp_${index + 1}`, 
-                        time: new Date().toISOString() 
-                    };
-                    sessionPoints.push(entry);
-                    importedCount++;
+                    sessionPoints.push({ lat, lng, alt: 0, name: `Imp_${index + 1}`, time: new Date().toISOString() });
                 }
             }
         });
-
-        if (importedCount > 0) {
+        if (sessionPoints.length > 0) {
             let cleanName = file.name.replace(/\.[^/.]+$/, "");
-            let saveKey = cleanName;
-            let counter = 1;
-            while (db[saveKey]) {
-                saveKey = `${cleanName}_${counter}`;
-                counter++;
+            let savedDb = localStorage.getItem('gps_pro_db');
+            let currentDb = savedDb ? JSON.parse(savedDb) : {};
+            currentDb[cleanName] = sessionPoints;
+            localStorage.setItem('gps_pro_db', JSON.stringify(currentDb));
+            loadAllPointsFromDatabase();
+            alert(`Berhasil mengimpor ${sessionPoints.length} titik TXT ke database!`);
+        } else {
+            alert("Format TXT tidak valid.");
+        }
+        event.target.value = "";
+    };
+    reader.readAsText(file);
+}
+
+function handleGpxImport(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        try {
+            const parser = new DOMParser();
+            const xmlDoc = parser.parseFromString(e.target.result, "text/xml");
+            const trkpts = xmlDoc.getElementsByTagName("trkpt");
+            let sessionPoints = [];
+
+            for (let i = 0; i < trkpts.length; i++) {
+                let lat = parseFloat(trkpts[i].getAttribute("lat"));
+                let lon = parseFloat(trkpts[i].getAttribute("lon"));
+                let eleNode = trkpts[i].getElementsByTagName("ele")[0];
+                let nameNode = trkpts[i].getElementsByTagName("name")[0];
+                let timeNode = trkpts[i].getElementsByTagName("time")[0];
+
+                let alt = eleNode ? parseFloat(eleNode.textContent) : 0;
+                let name = nameNode ? nameNode.textContent : `GPX_${i+1}`;
+                let time = timeNode ? timeNode.textContent : new Date().toISOString();
+
+                if (!isNaN(lat) && !isNaN(lon)) {
+                    sessionPoints.push({ lat: lat, lng: lon, alt: alt, name: name, time: time });
+                }
             }
 
-            db[saveKey] = sessionPoints;
-            localStorage.setItem('gps_pro_db', JSON.stringify(db));
-
-            loadAllPointsFromDatabase();
-
-            document.getElementById('current-filename').innerText = saveKey;
-            document.getElementById('active-file-label').style.display = 'block';
-            
-            alert(`Berhasil mengimpor dan menyimpan ${importedCount} titik dengan nama: "${saveKey}"!`);
-        } else {
-            alert("Format koordinat tidak valid.");
+            if (sessionPoints.length > 0) {
+                // Tampilkan sementara di layar tanpa merusak database utama, atau masukkan ke database opsional
+                markersLayer.clearLayers();
+                activePoints = sessionPoints;
+                activePoints.forEach(addMarker);
+                
+                document.getElementById('current-filename').innerText = "VIEW GPX: " + file.name;
+                document.getElementById('active-file-label').style.display = 'block';
+                setFollowMode(false);
+                map.setView([activePoints[0].lat, activePoints[0].lng], 16, { animate: true });
+                
+                alert(`Berhasil membuka file GPX (${sessionPoints.length} titik). Klik tombol "KEMBALI KE DB UTAMA" untuk kembali.`);
+            } else {
+                alert("Tidak ada titik koordinat valid ditemukan di dalam file GPX.");
+            }
+        } catch(err) {
+            alert("Gagal membaca file GPX.");
         }
         event.target.value = "";
     };
@@ -448,7 +491,7 @@ function handleTxtImport(event) {
 }
 
 function closeDialog(id) { document.getElementById(id).style.display = 'none'; }
-function resetApp() { if(confirm("RESET TOTAL?")) { localStorage.clear(); location.reload(); } }
+function resetApp() { if(confirm("RESET TOTAL SEMUA DATABASE?")) { localStorage.clear(); location.reload(); } }
 </script>
 </body>
 </html>
